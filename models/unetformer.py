@@ -51,7 +51,7 @@ class SeparableConvBNReLU(nn.Sequential):
                 padding=((stride - 1) + dilation * (kernel_size - 1)) // 2,
                 groups=in_channels, bias=False,
             ),
-            norm_layer(out_channels),
+            norm_layer(in_channels),
             nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
             nn.ReLU6(),
         )
@@ -65,7 +65,7 @@ class SeparableConvBN(nn.Sequential):
                 padding=((stride - 1) + dilation * (kernel_size - 1)) // 2,
                 groups=in_channels, bias=False,
             ),
-            norm_layer(out_channels),
+            norm_layer(in_channels),
             nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
         )
 
@@ -233,7 +233,7 @@ class WF(nn.Module):
 
     def forward(self, x, res):
         x = F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
-        weights = nn.ReLU()(self.weights)
+        weights = F.relu(self.weights)
         fuse_weights = weights / (torch.sum(weights, dim=0) + self.eps)
         x = fuse_weights[0] * self.pre_conv(res) + fuse_weights[1] * x
         return self.post_conv(x)
@@ -263,7 +263,7 @@ class FeatureRefinementHead(nn.Module):
 
     def forward(self, x, res):
         x = F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
-        weights = nn.ReLU()(self.weights)
+        weights = F.relu(self.weights)
         fuse_weights = weights / (torch.sum(weights, dim=0) + self.eps)
         x = fuse_weights[0] * self.pre_conv(res) + fuse_weights[1] * x
         x = self.post_conv(x)
@@ -366,15 +366,3 @@ class UNetFormer(nn.Module):
         h, w = x.shape[-2:]
         res1, res2, res3, res4 = self.backbone(x)
         return self.decoder(res1, res2, res3, res4, h, w)
-
-
-def build_model(config: dict) -> UNetFormer:
-    model_cfg = config["model"]
-    return UNetFormer(
-        decode_channels=model_cfg.get("decode_channels", 64),
-        dropout=model_cfg.get("dropout", 0.1),
-        backbone_name=model_cfg.get("backbone", "swsl_resnet18"),
-        pretrained=model_cfg.get("pretrained", True),
-        window_size=model_cfg.get("window_size", 8),
-        num_classes=config["data"]["num_classes"],
-    )

@@ -8,101 +8,95 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 
-from datasets.irsamap import build_dataloaders
-from losses.composite import SegmentationLoss
-from models.unetformer import build_model
-from tools.config import load_config
-from tools.metrics import compute_metrics, mean_iou, mean_dice
-from tools.utils import get_device, save_checkpoint, set_seed
+from datasets.combined_dataset import build_train_loader, build_val_loader
+from datasets.label_maps import CLASS_NAMES, IGNORE_INDEX
+from losses.losses import SegmentationLoss
+from metrics.segmentation_metrics import compute_metrics, format_metrics
+from models.model_factory import build_model
+from utils.config import get_project_root, load_config
+from utils.seed import get_device, set_seed
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train UNetFormer on IRSAMap.")
-    parser.add_argument(
-        "-c",
-        "--config",
-        default="config/unetformer_resnet18.yml",
-        help="Path to YAML config file.",
-    )
-    parser.add_argument("--resume", default=None, help="Optional checkpoint to resume from.")
+    parser = argparse.ArgumentParser(description="Train LULC semantic segmentation model.")
+    parser.add_argument("--config", required=True, help="Path to YAML config file.")
     return parser.parse_args()
 
 
-def evaluate(model, loader, criterion, device, num_classes, ignore_index, class_names):
+def resolve_checkpoint_path(path: str | Path, project_root: Path) -> Path:
+    path = Path(path)
+    return path if path.is_absolute() else project_root / path
+
+
+def save_checkpoint(path: Path, model, optimizer, epoch, metrics, config) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "metrics": metrics,
+            "config": config,
+        },
+        path,
+    )
+
+
+@torch.no_grad()
+def evaluate(model, loader, criterion, device, num_classes, ignore_index):
     model.eval()
     total_loss = 0.0
+    tp = np.zeros(num_classes, dtype=np.int64)
+    fp = np.zeros(num_classes, dtype=np.int64)
+    fn = np.zeros(num_classes, dtype=np.int64)
+    total_correct = 0
+    total_pixels = 0
 
-    # Initialize accumulators for metrics
-    tp_total = [0] * num_classes
-    fp_total = [0] * num_classes
-    fn_total = [0] * num_classes
-    total_oa_sum = 0.0
-    total_batches = 0
+    for batch in tqdm(loader, desc="Validate", leave=False):
+        images = batch["image"].to(device)
+        masks = batch["mask"].to(device)
+        outputs = model(images)
+        total_loss += criterion(outputs, masks).item()
 
-    with torch.no_grad():
-        for batch in tqdm(loader, desc="Validate", leave=False, ncols=80):
-            images = batch["image"].to(device)
-            masks = batch["mask"].to(device)
-            outputs = model(images)
-            loss = criterion(outputs, masks)
-            total_loss += loss.item()
+        logits = outputs[0] if isinstance(outputs, tuple) else outputs
+        preds = logits.argmax(dim=1)
 
-            logits = outputs[0] if isinstance(outputs, tuple) else outputs
-            preds = logits.argmax(dim=1)
+        valid_mask = masks != ignore_index
+        total_correct += (preds[valid_mask] == masks[valid_mask]).sum().item()
+        total_pixels += valid_mask.sum().item()
 
-            # Compute batch metrics
-            batch_metrics = compute_metrics(preds, masks, num_classes, ignore_index)
+        for cls in range(num_classes):
+            pred_mask = (preds == cls) & valid_mask
+            target_mask = (masks == cls) & valid_mask
+            tp[cls] += torch.logical_and(pred_mask, target_mask).sum().item()
+            fp[cls] += torch.logical_and(pred_mask, ~target_mask).sum().item()
+            fn[cls] += torch.logical_and(~pred_mask, target_mask).sum().item()
 
-            # Accumulate metrics
-            for cls in range(num_classes):
-                tp_total[cls] += batch_metrics["tp_per_class"][cls]
-                fp_total[cls] += batch_metrics["fp_per_class"][cls]
-                fn_total[cls] += batch_metrics["fn_per_class"][cls]
-
-            total_oa_sum += batch_metrics["oa"]
-            total_batches += 1
-
-    # Compute final per-class metrics
     per_class_iou = []
     per_class_f1 = []
     for cls in range(num_classes):
-        tp = tp_total[cls]
-        fp = fp_total[cls]
-        fn = fn_total[cls]
+        union = tp[cls] + fp[cls] + fn[cls]
+        per_class_iou.append(float("nan") if union == 0 else tp[cls] / union)
+        denom = 2 * tp[cls] + fp[cls] + fn[cls]
+        per_class_f1.append(float("nan") if denom == 0 else (2 * tp[cls]) / denom)
 
-        union = tp + fp + fn
-        if union == 0:
-            iou = float("nan")
-        else:
-            iou = tp / union
+    oa = total_correct / total_pixels if total_pixels > 0 else 0.0
 
-        if (2 * tp + fp + fn) == 0:
-            f1 = float("nan")
-        else:
-            f1 = (2 * tp) / (2 * tp + fp + fn)
-
-        per_class_iou.append(iou)
-        per_class_f1.append(f1)
-
-    # Compute overall metrics
-    overall_oa = total_oa_sum / total_batches if total_batches > 0 else 0.0
-    overall_miou = mean_iou(per_class_iou)
-    overall_mf1 = mean_dice(per_class_f1)
-
-    return {
+    metrics = {
         "loss": total_loss / max(len(loader), 1),
-        "overall_oa": overall_oa,
-        "overall_miou": overall_miou,
-        "overall_mf1": overall_mf1,
+        "oa": oa,
+        "miou": float(np.nanmean(per_class_iou)),
+        "mf1": float(np.nanmean(per_class_f1)),
         "per_class_iou": per_class_iou,
         "per_class_f1": per_class_f1,
     }
+    return metrics
 
 
 def train_one_epoch(model, loader, criterion, optimizer, device, log_interval):
     model.train()
     running_loss = 0.0
-    progress = tqdm(loader, desc="Train", leave=False, ncols=80)
+    progress = tqdm(loader, desc="Train", leave=False)
 
     for step, batch in enumerate(progress, start=1):
         images = batch["image"].to(device)
@@ -116,87 +110,50 @@ def train_one_epoch(model, loader, criterion, optimizer, device, log_interval):
 
         running_loss += loss.item()
         if step % log_interval == 0:
-            progress.set_postfix(loss=f"{running_loss / step:.4f}", refresh=False)
+            progress.set_postfix(loss=f"{running_loss / step:.4f}")
 
     return running_loss / max(len(loader), 1)
 
 
-def init_csv_logger(log_path, num_classes, class_names):
-    """Initialize CSV log file with headers."""
-    headers = ["epoch", "train_loss"]
-
-    # Add validation metrics
-    headers.extend([
-        "val_loss",
-        "val_oa",
-        "val_miou",
-        "val_mf1"
-    ])
-
-    # Add per-class IoU and F1
-    for name in class_names:
-        headers.append(f"iou_{name}")
-    for name in class_names:
-        headers.append(f"f1_{name}")
-
-    # Create file and write headers
+def init_csv_logger(log_path: Path):
+    headers = ["epoch", "train_loss", "val_loss", "val_oa", "val_miou", "val_mf1"]
+    headers.extend([f"iou_{name}" for name in CLASS_NAMES])
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, mode='w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(headers)
-
-    return log_path
+    with open(log_path, "w", newline="", encoding="utf-8") as handle:
+        csv.writer(handle).writerow(headers)
 
 
-def log_to_csv(log_path, epoch, train_loss, val_metrics, class_names):
-    """Append metrics to CSV file."""
-    row = [epoch, train_loss]
-
-    # Add validation metrics
-    row.extend([
+def append_csv_log(log_path: Path, epoch, train_loss, val_metrics):
+    row = [
+        epoch,
+        train_loss,
         val_metrics["loss"],
-        val_metrics["overall_oa"],
-        val_metrics["overall_miou"],
-        val_metrics["overall_mf1"]
-    ])
-
-    # Add per-class IoU
-    for iou in val_metrics["per_class_iou"]:
-        row.append(iou if not np.isnan(iou) else "")
-
-    # Add per-class F1
-    for f1 in val_metrics["per_class_f1"]:
-        row.append(f1 if not np.isnan(f1) else "")
-
-    with open(log_path, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(row)
+        val_metrics["oa"],
+        val_metrics["miou"],
+        val_metrics["mf1"],
+    ]
+    row.extend(val_metrics["per_class_iou"])
+    with open(log_path, "a", newline="", encoding="utf-8") as handle:
+        csv.writer(handle).writerow(row)
 
 
 def main():
     args = parse_args()
-    project_root = Path(__file__).resolve().parent
-    config = load_config(project_root / args.config)
+    project_root = get_project_root()
+    config = load_config(resolve_checkpoint_path(args.config, project_root))
 
     train_cfg = config["train"]
     data_cfg = config["data"]
     set_seed(train_cfg.get("seed", 42))
 
-    # Get class names
-    from tools.palette import CLASS_NAMES
-    class_names = CLASS_NAMES
-    num_classes = data_cfg["num_classes"]
-
-    device = get_device(
-        train_cfg.get("device", "cuda"),
-        train_cfg.get("gpu_id", 0),
-    )
-    train_loader, val_loader = build_dataloaders(config, project_root)
+    device = get_device(train_cfg.get("device", "cuda"), train_cfg.get("gpu_id", 0))
+    train_loader = build_train_loader(config)
+    val_loader = build_val_loader(config)
 
     model = build_model(config).to(device)
     criterion = SegmentationLoss(
         num_classes=data_cfg["num_classes"],
-        ignore_index=data_cfg.get("ignore_index", 255),
+        ignore_index=data_cfg.get("ignore_index", IGNORE_INDEX),
         aux_weight=train_cfg.get("aux_loss_weight", 0.4),
     )
     optimizer = AdamW(
@@ -206,33 +163,34 @@ def main():
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=train_cfg["epochs"])
 
-    start_epoch = 1
     checkpoint_dir = project_root / train_cfg.get("checkpoint_dir", "checkpoints")
-    log_path = checkpoint_dir / "training_log.csv"
-    best_miou = 0.0
+    best_checkpoint = checkpoint_dir / train_cfg.get("checkpoint_name", "best.pth")
+    log_path = checkpoint_dir / f"{config['experiment']['name']}_training_log.csv"
 
-    if args.resume:
-        checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
+    start_epoch = 1
+    best_miou = -1.0
+    if train_cfg.get("resume"):
+        resume_path = resolve_checkpoint_path(train_cfg["resume"], project_root)
+        checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if not train_cfg.get("finetune_reset_optimizer", False):
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         start_epoch = checkpoint.get("epoch", 0) + 1
-        best_miou = checkpoint.get("metrics", {}).get("overall_miou", 0.0)
+        best_miou = checkpoint.get("metrics", {}).get("miou", -1.0)
+        print(f"Resumed from {resume_path} (epoch {checkpoint.get('epoch', '?')})")
 
-    # Initialize CSV logger
-    init_csv_logger(log_path, num_classes, class_names)
+    if start_epoch == 1:
+        init_csv_logger(log_path)
 
-    if device.type == "cuda":
-        print(f"Device: {device} ({torch.cuda.get_device_name(device)})")
-    else:
-        print(f"Device: {device}")
+    print(f"Experiment: {config['experiment']['name']} ({config['experiment']['stage']})")
+    print(f"Device: {device}")
     print(f"Train samples: {len(train_loader.dataset)}")
-    if val_loader is not None:
-        print(f"Val samples: {len(val_loader.dataset)}")
-    print(f"Logging to: {log_path}")
+    print(f"Val samples: {len(val_loader.dataset)}")
+    print(f"Checkpoint: {best_checkpoint}")
     print()
 
+    val_metrics = {}
     for epoch in range(start_epoch, train_cfg["epochs"] + 1):
-        print(f"Epoch {epoch}/{train_cfg['epochs']}")
         train_loss = train_one_epoch(
             model,
             train_loader,
@@ -243,76 +201,46 @@ def main():
         )
         scheduler.step()
 
-        val_metrics = None
-        if val_loader is not None:
-            val_metrics = evaluate(
-                model,
-                val_loader,
-                criterion,
-                device,
-                data_cfg["num_classes"],
-                data_cfg.get("ignore_index", 255),
-                class_names
-            )
+        val_metrics = evaluate(
+            model,
+            val_loader,
+            criterion,
+            device,
+            data_cfg["num_classes"],
+            data_cfg.get("ignore_index", IGNORE_INDEX),
+        )
 
-            # Print metrics
-            print(f"  Train Loss: {train_loss:.4f}")
-            print(f"  Val Loss: {val_metrics['loss']:.4f}")
-            print(f"  Val OA: {val_metrics['overall_oa']:.4f}")
-            print(f"  Val mIoU: {val_metrics['overall_miou']:.4f}")
-            print(f"  Val mF1: {val_metrics['overall_mf1']:.4f}")
-            print("  Per-class IoU:")
-            for name, iou in zip(class_names, val_metrics["per_class_iou"]):
-                if not np.isnan(iou):
-                    print(f"    {name:12s}: {iou:.4f}")
-            print("  Per-class F1:")
-            for name, f1 in zip(class_names, val_metrics["per_class_f1"]):
-                if not np.isnan(f1):
-                    print(f"    {name:12s}: {f1:.4f}")
+        print(f"Epoch {epoch}/{train_cfg['epochs']}")
+        print(f"  Train Loss: {train_loss:.4f}")
+        print(f"  Val Loss:   {val_metrics['loss']:.4f}")
+        print(f"  {format_metrics(val_metrics)}")
+        append_csv_log(log_path, epoch, train_loss, val_metrics)
 
-            # Log to CSV
-            log_to_csv(log_path, epoch, train_loss, val_metrics, class_names)
+        if val_metrics["miou"] >= best_miou:
+            best_miou = val_metrics["miou"]
+            save_checkpoint(best_checkpoint, model, optimizer, epoch, val_metrics, config)
+            print(f"  Saved best checkpoint: {best_checkpoint} (mIoU={best_miou:.4f})")
 
-            # Save best model
-            if val_metrics["overall_miou"] >= best_miou:
-                best_miou = val_metrics["overall_miou"]
-                save_checkpoint(
-                    checkpoint_dir / "best.pt",
-                    model,
-                    optimizer,
-                    epoch,
-                    val_metrics,
-                    config,
-                )
-                print(f"  Saved best model (mIoU: {best_miou:.4f})")
-        else:
-            print(f"  Train Loss: {train_loss:.4f}")
-
-        # Save periodic checkpoint
         if epoch % train_cfg.get("save_interval", 10) == 0:
             save_checkpoint(
-                checkpoint_dir / f"epoch_{epoch:03d}.pt",
+                checkpoint_dir / f"{config['experiment']['name']}_epoch_{epoch:03d}.pt",
                 model,
                 optimizer,
                 epoch,
-                val_metrics if val_metrics else {"train_loss": train_loss},
+                val_metrics,
                 config,
             )
-            print(f"  Saved checkpoint epoch_{epoch:03d}.pt")
-
         print()
 
-    # Save final checkpoint
     save_checkpoint(
-        checkpoint_dir / "last.pt",
+        checkpoint_dir / f"{config['experiment']['name']}_last.pt",
         model,
         optimizer,
         train_cfg["epochs"],
-        val_metrics if val_metrics else {"train_loss": train_loss},
+        val_metrics,
         config,
     )
-    print(f"Training complete!")
-    print(f"Checkpoints and log saved to: {checkpoint_dir}")
+    print(f"Training complete. Log: {log_path}")
 
 
 if __name__ == "__main__":

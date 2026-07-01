@@ -16,9 +16,9 @@ def build_transforms(image_size: int, augment_cfg: dict | None = None, is_train:
 
     transforms.extend(
         [
-            A.Resize(image_size, image_size),
+            A.Resize(image_size, image_size, interpolation=1),
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ToTensorV2(),
         ]
     )
-    return A.Compose(transforms)
+    return A.Compose(transforms, is_check_shapes=False)

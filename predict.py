@@ -6,61 +6,45 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from datasets.irsamap_dataset import rgb_mask_to_class_indices
 from datasets.transforms import build_transforms
-from models.unetformer import build_model
-from tools.config import get_data_paths, load_config
-from tools.palette import class_indices_to_color
-from tools.utils import get_device
+from models.model_factory import build_model
+from utils.config import get_project_root, load_config, resolve_path
+from utils.seed import get_device
+from utils.visualization import class_mask_to_color, save_side_by_side
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run UNetFormer inference.")
+    parser = argparse.ArgumentParser(description="Run inference and save visualizations.")
+    parser.add_argument("--config", required=True, help="Path to YAML config file.")
+    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint.")
     parser.add_argument(
-        "-c",
-        "--config",
-        default="config/unetformer_resnet18.yml",
-        help="Path to YAML config file.",
+        "--split",
+        choices=["test", "val"],
+        default="test",
+        help="IRSAMap split to run predictions on.",
     )
     parser.add_argument(
-        "--checkpoint",
-        default="checkpoints/best.pt",
-        help="Checkpoint path.",
-    )
-    parser.add_argument(
-        "-i",
-        "--input",
-        default=None,
-        help="Input image or directory. Defaults to test split from config.",
-    )
-    parser.add_argument(
-        "-o",
         "--output",
         default="outputs/predictions",
-        help="Output directory for prediction masks.",
+        help="Directory for prediction outputs.",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Optional limit on number of samples to predict.",
     )
     return parser.parse_args()
 
 
-def collect_images(path: Path) -> list[Path]:
-    if path.is_file():
-        return [path]
-    return sorted(
-        p for p in path.iterdir()
-        if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
-    )
-
-
-def predict_image(model, image_path: Path, transform, device):
-    image = cv2.cvtColor(cv2.imread(str(image_path)), cv2.COLOR_BGR2RGB)
-    original_size = image.shape[:2]
-    transformed = transform(image=image)
+@torch.no_grad()
+def predict_image(model, image_rgb, transform, device, original_size):
+    transformed = transform(image=image_rgb)
     tensor = transformed["image"].unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        logits = model(tensor)
-        if isinstance(logits, tuple):
-            logits = logits[0]
-        pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
+    outputs = model(tensor)
+    logits = outputs[0] if isinstance(outputs, tuple) else outputs
+    pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
 
     if pred.shape != original_size:
         pred = cv2.resize(
@@ -73,47 +57,66 @@ def predict_image(model, image_path: Path, transform, device):
 
 def main():
     args = parse_args()
-    project_root = Path(__file__).resolve().parent
-    config = load_config(project_root / args.config)
+    project_root = get_project_root()
+    config = load_config(resolve_path(args.config, project_root))
     data_cfg = config["data"]
-    paths = get_data_paths(config, project_root)
-
-    if args.input:
-        input_path = Path(args.input)
-        if not input_path.is_absolute():
-            input_path = project_root / input_path
-    else:
-        input_path = paths["test_images"] or paths["val_images"] or paths["train_images"]
-
-    output_dir = Path(args.output)
-    if not output_dir.is_absolute():
-        output_dir = project_root / output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    image_paths = collect_images(input_path)
-    if not image_paths:
-        raise RuntimeError(f"No images found in {input_path}")
-
     train_cfg = config["train"]
-    device = get_device(
-        train_cfg.get("device", "cuda"),
-        train_cfg.get("gpu_id", 0),
-    )
+    irsamap_cfg = data_cfg["irsamap"]
+
+    root = resolve_path(project_root, irsamap_cfg["root"])
+    if args.split == "test":
+        image_dir = resolve_path(root, irsamap_cfg["test_images"])
+        mask_dir = resolve_path(root, irsamap_cfg["test_masks"])
+    else:
+        image_dir = resolve_path(root, irsamap_cfg["val_images"])
+        mask_dir = resolve_path(root, irsamap_cfg["val_masks"])
+
+    output_dir = resolve_path(args.output, project_root)
+    pred_dir = output_dir / "masks"
+    color_dir = output_dir / "color"
+    vis_dir = output_dir / "visualizations"
+    for directory in (pred_dir, color_dir, vis_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    device = get_device(train_cfg.get("device", "cuda"), train_cfg.get("gpu_id", 0))
     model = build_model(config).to(device)
-    checkpoint = torch.load(project_root / args.checkpoint, map_location=device, weights_only=False)
+    checkpoint = torch.load(resolve_path(args.checkpoint, project_root), map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
     transform = build_transforms(data_cfg.get("image_size", 512), is_train=False)
+    image_paths = sorted(
+        path for path in image_dir.iterdir() if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
+    )
+    if args.max_samples is not None:
+        image_paths = image_paths[: args.max_samples]
 
     for image_path in tqdm(image_paths, desc="Predict"):
-        pred = predict_image(model, image_path, transform, device)
-        color_mask = class_indices_to_color(pred)
-        color_mask_bgr = cv2.cvtColor(color_mask, cv2.COLOR_RGB2BGR)
+        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if image is None:
+            continue
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        original_size = image_rgb.shape[:2]
+
+        mask_path = mask_dir / image_path.name
+        if mask_path.exists():
+            mask_rgb = cv2.cvtColor(cv2.imread(str(mask_path), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+            ground_truth = rgb_mask_to_class_indices(mask_rgb)
+        else:
+            ground_truth = np.zeros(original_size, dtype=np.int64)
+
+        prediction = predict_image(model, image_rgb, transform, device, original_size)
+        color_pred = class_mask_to_color(prediction)
 
         stem = image_path.stem
-        cv2.imwrite(str(output_dir / f"{stem}_mask.png"), pred.astype(np.uint8))
-        cv2.imwrite(str(output_dir / f"{stem}_color.png"), color_mask_bgr)
+        cv2.imwrite(str(pred_dir / f"{stem}.png"), prediction.astype(np.uint8))
+        cv2.imwrite(str(color_dir / f"{stem}.png"), cv2.cvtColor(color_pred, cv2.COLOR_RGB2BGR))
+        save_side_by_side(
+            image_rgb,
+            ground_truth,
+            prediction,
+            vis_dir / f"{stem}_compare.png",
+        )
 
     print(f"Saved predictions to {output_dir}")
 
