@@ -36,7 +36,17 @@ send_error_email() {
     local python_cmd="python3"
     if ! command -v python3 &>/dev/null; then
         if command -v python &>/dev/null; then
-            python_cmd="python"
+            # Check if 'python' is the real Python or the Microsoft Store stub
+            if python --version &>/dev/null; then
+                python_cmd="python"
+            elif command -v py &>/dev/null; then
+                python_cmd="py"
+            else
+                echo "❌ Error: Python is not installed. Unable to send email notification."
+                return 1
+            fi
+        elif command -v py &>/dev/null; then
+            python_cmd="py"
         else
             echo "❌ Error: Python is not installed. Unable to send email notification."
             return 1
