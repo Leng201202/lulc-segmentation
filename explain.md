@@ -119,17 +119,15 @@ python tools/prepare_loveda.py  --src data/LoveDA_raw  --dst data/LoveDA
 # Step 2 — Verify dataset counts and dimensions
 python tools/verify_dataset.py
 
-# Step 3 — Run training stages
-python train.py --config configs/irsamap_unetformer_resnet18_8class.yaml
-python train.py --config configs/irsamap_loveda_support_unetformer_resnet18_8class.yaml
-python train.py --config configs/irsamap_finetune_from_support.yaml
-
-# Step 4 — Run evaluation on the test set
-python evaluate.py --config configs/irsamap_finetune_from_support.yaml \
-                   --checkpoint checkpoints/best_irsamap_finetune.pth
-
-# Step 5 — Predict visualizations
-python predict.py --config configs/irsamap_finetune_from_support.yaml \
-                  --checkpoint checkpoints/best_irsamap_finetune.pth \
-                  --split test
+# Step 3 — Run the entire 3-stage training, evaluation, and prediction pipeline automatically
+bash run_pipeline.sh
 ```
+
+---
+
+## 5. Pipeline Alerting (Email Notification)
+
+The `run_pipeline.sh` script is configured with SMTP email alerting capability:
+* **Configuration**: Set your credentials (`EMAIL_TO`, `EMAIL_FROM`, `SMTP_SERVER`, etc.) at the top of [run_pipeline.sh](file:///Users/leng/Documents/lulc-segmentation/run_pipeline.sh).
+* **Behavior**: If training, evaluation, or prediction fails during any of the stages, the script immediately sends an email notification containing the failed step details and the last 50 lines of log output before terminating.
+

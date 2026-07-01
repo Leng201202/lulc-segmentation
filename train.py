@@ -1,5 +1,6 @@
 import argparse
 import csv
+import math
 from pathlib import Path
 
 import numpy as np
@@ -190,6 +191,9 @@ def main():
     print()
 
     val_metrics = {}
+    epochs_no_improve = 0
+    patience = train_cfg.get("early_stopping_patience", 10)
+
     for epoch in range(start_epoch, train_cfg["epochs"] + 1):
         train_loss = train_one_epoch(
             model,
@@ -213,13 +217,25 @@ def main():
         print(f"Epoch {epoch}/{train_cfg['epochs']}")
         print(f"  Train Loss: {train_loss:.4f}")
         print(f"  Val Loss:   {val_metrics['loss']:.4f}")
-        print(f"  {format_metrics(val_metrics)}")
+        print(f"  OA:   {val_metrics['oa']:.4f}")
+        print(f"  mIoU: {val_metrics['miou']:.4f}  mF1: {val_metrics['mf1']:.4f}")
+        # Per-class IoU for key tracked classes
+        iou = val_metrics["per_class_iou"]
+        print("  Per-class IoU:")
+        for cls_idx, cls_name in enumerate(CLASS_NAMES):
+            v = iou[cls_idx]
+            bar = f"{v:.4f}" if not math.isnan(v) else "  N/A "
+            print(f"    {cls_name:<12}: {bar}")
         append_csv_log(log_path, epoch, train_loss, val_metrics)
 
-        if val_metrics["miou"] >= best_miou:
+        if val_metrics["miou"] > best_miou:
             best_miou = val_metrics["miou"]
+            epochs_no_improve = 0
             save_checkpoint(best_checkpoint, model, optimizer, epoch, val_metrics, config)
             print(f"  Saved best checkpoint: {best_checkpoint} (mIoU={best_miou:.4f})")
+        else:
+            epochs_no_improve += 1
+            print(f"  No improvement in mIoU for {epochs_no_improve} epoch(s).")
 
         if epoch % train_cfg.get("save_interval", 10) == 0:
             save_checkpoint(
@@ -230,13 +246,27 @@ def main():
                 val_metrics,
                 config,
             )
+
+        if epochs_no_improve >= patience:
+            print(f"  Early stopping triggered. Validation mIoU did not improve for {patience} epochs.")
+            # Write a flag file so the pipeline runner can detect early stopping and send an alert
+            flag_path = checkpoint_dir / f"{config['experiment']['name']}_early_stopped.txt"
+            with open(flag_path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"experiment: {config['experiment']['name']}\n"
+                    f"stage: {config['experiment']['stage']}\n"
+                    f"stopped_at_epoch: {epoch}\n"
+                    f"best_miou: {best_miou:.4f}\n"
+                    f"patience: {patience}\n"
+                )
+            break
         print()
 
     save_checkpoint(
         checkpoint_dir / f"{config['experiment']['name']}_last.pt",
         model,
         optimizer,
-        train_cfg["epochs"],
+        epoch,  # Use current epoch in case of early stopping
         val_metrics,
         config,
     )

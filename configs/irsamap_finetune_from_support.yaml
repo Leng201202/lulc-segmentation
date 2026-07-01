@@ -29,11 +29,11 @@ model:
 train:
   device: cuda
   gpu_id: 0
-  epochs: 30
+  epochs: 25
   batch_size: 8
   val_batch_size: 8
   num_workers: 4
-  lr: 0.0001
+  lr: 0.0003
   weight_decay: 0.01
   aux_loss_weight: 0.4
   seed: 42
@@ -43,6 +43,7 @@ train:
   finetune_reset_optimizer: true
   log_interval: 10
   save_interval: 10
+  early_stopping_patience: 10
 
 augment:
   hflip: true
