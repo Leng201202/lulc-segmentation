@@ -1,0 +1,48 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class DiceLoss(nn.Module):
+    def __init__(self, num_classes: int, ignore_index: int = 255):
+        super().__init__()
+        self.num_classes = num_classes
+        self.ignore_index = ignore_index
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        probs = F.softmax(logits, dim=1)
+        valid = targets != self.ignore_index
+        targets = targets.clone()
+        targets[~valid] = 0
+
+        dice_scores = []
+        for cls in range(self.num_classes):
+            pred = probs[:, cls]
+            target = (targets == cls).float()
+            mask = valid.float()
+            intersection = (pred * target * mask).sum()
+            union = (pred * mask).sum() + (target * mask).sum()
+            if union == 0:
+                continue
+            dice_scores.append(1.0 - (2.0 * intersection + 1.0) / (union + 1.0))
+
+        if not dice_scores:
+            return logits.sum() * 0.0
+        return torch.stack(dice_scores).mean()
+
+
+class SegmentationLoss(nn.Module):
+    def __init__(self, num_classes: int, ignore_index: int = 255, aux_weight: float = 0.4):
+        super().__init__()
+        self.ce = nn.CrossEntropyLoss(ignore_index=ignore_index)
+        self.dice = DiceLoss(num_classes=num_classes, ignore_index=ignore_index)
+        self.aux_weight = aux_weight
+
+    def forward(self, outputs, targets: torch.Tensor) -> torch.Tensor:
+        if isinstance(outputs, tuple):
+            main_logits, aux_logits = outputs
+            main_loss = self.ce(main_logits, targets) + self.dice(main_logits, targets)
+            aux_loss = self.ce(aux_logits, targets) + self.dice(aux_logits, targets)
+            return main_loss + self.aux_weight * aux_loss
+
+        return self.ce(outputs, targets) + self.dice(outputs, targets)

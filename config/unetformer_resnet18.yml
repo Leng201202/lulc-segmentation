@@ -1,0 +1,48 @@
+project:
+  name: unetformer_resnet18
+  task: semantic_segmentation
+  dataset: IRSAMap
+
+data:
+  root: data/IRSAMap
+  train_images: train/images
+  train_masks: train/masks
+  val_image_dir: val/images
+  val_mask_dir: val/masks
+  test_image_dir: test/images
+  test_mask_dir: test/masks
+  num_classes: 12
+  image_size: 512
+  val_split: 0.2
+  label_encoding: category_code  # ref_code | category_code | rgb
+  ignore_index: 255
+  # Official IRSAMap download: https://github.com/ucas-dlg/IRSAMap
+  # Recommended labels: SegLabel_vwsbr (category codes)
+  # Prepare with: python tools/prepare_irsamap.py --source /path/to/download
+
+model:
+  name: unetformer
+  backbone: swsl_resnet18
+  pretrained: true
+  decode_channels: 64
+  window_size: 8
+  dropout: 0.1
+
+train:
+  device: cuda
+  gpu_id: 0
+  epochs: 100
+  batch_size: 8
+  num_workers: 4
+  lr: 0.0006
+  weight_decay: 0.01
+  aux_loss_weight: 0.4
+  seed: 42
+  checkpoint_dir: checkpoints
+  log_interval: 10
+  save_interval: 10
+
+augment:
+  hflip: true
+  vflip: true
+  rotate90: true
