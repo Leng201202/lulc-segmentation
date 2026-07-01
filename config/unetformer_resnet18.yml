@@ -28,14 +28,14 @@ project:
   task: semantic_segmentation
 train:
   aux_loss_weight: 0.4
-  batch_size: 1
+  batch_size: 4
   checkpoint_dir: checkpoints
   device: cuda
-  epochs: 1
+  epochs: 35
   gpu_id: 0
   log_interval: 10
   lr: 0.0006
   num_workers: 4
-  save_interval: 1
+  save_interval: 10
   seed: 42
   weight_decay: 0.01

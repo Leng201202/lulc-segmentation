@@ -2,6 +2,7 @@ import argparse
 import csv
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -173,8 +174,6 @@ def log_to_csv(log_path, epoch, train_loss, val_metrics, class_names):
 
 
 def main():
-    import numpy as np  # Import here to avoid circular issues
-
     args = parse_args()
     project_root = Path(__file__).resolve().parent
     config = load_config(project_root / args.config)
