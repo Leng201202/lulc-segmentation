@@ -6,12 +6,20 @@ from pathlib import Path
 from datasets.irsamap_dataset import mask_to_class_indices, list_image_files
 from datasets.label_maps import CLASS_NAMES, IGNORE_INDEX
 
+import sys
+
 def main():
-    mask_dir = Path("data/irsamap/masks")
-    if not mask_dir.exists():
-        print(f"Mask directory not found: {mask_dir}")
-        print("Please update mask_dir in this script to point to your IRSAMap masks.")
-        return
+    if len(sys.argv) > 1:
+        mask_dir = Path(sys.argv[1])
+    else:
+        candidates = [
+            Path("data/IRSAMap_prepared/train/masks_rgb"),
+            Path("data/IRSAMap_prepared/val/masks_rgb"),
+            Path("data/irsamap/masks_rgb"),
+            Path("data/irsamap/masks"),
+        ]
+        mask_dir = next((p for p in candidates if p.exists()), candidates[0])
+    print(f"Using mask directory: {mask_dir}")
 
     mask_paths = list_image_files(mask_dir)
     if not mask_paths:
