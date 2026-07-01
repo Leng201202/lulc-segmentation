@@ -36,13 +36,13 @@ def compute_metrics(
     for cls in range(num_classes):
         union = tp[cls] + fp[cls] + fn[cls]
         if union == 0:
-            per_class_iou.append(float("nan"))
+            per_class_iou.append(0.0)
         else:
             per_class_iou.append(tp[cls] / union)
 
         denom = 2 * tp[cls] + fp[cls] + fn[cls]
         if denom == 0:
-            per_class_f1.append(float("nan"))
+            per_class_f1.append(0.0)
         else:
             per_class_f1.append((2 * tp[cls]) / denom)
 
@@ -73,8 +73,7 @@ def format_metrics(metrics: dict, class_names: list[str] | None = None) -> str:
         "Per-class IoU:",
     ]
     for name, iou in zip(class_names, metrics["per_class_iou"]):
-        if not np.isnan(iou):
-            lines.append(f"  {name:10s}: {iou:.4f}")
+        lines.append(f"  {name:10s}: {iou:.4f}")
     return "\n".join(lines)
 
 
@@ -85,11 +84,11 @@ def save_metrics(metrics: dict, output_path: Path) -> None:
         "miou": metrics["miou"],
         "mf1": metrics["mf1"],
         "per_class_iou": {
-            name: (None if np.isnan(iou) else float(iou))
+            name: float(iou)
             for name, iou in zip(CLASS_NAMES, metrics["per_class_iou"])
         },
         "per_class_f1": {
-            name: (None if np.isnan(f1) else float(f1))
+            name: float(f1)
             for name, f1 in zip(CLASS_NAMES, metrics["per_class_f1"])
         },
     }

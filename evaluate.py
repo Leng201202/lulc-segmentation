@@ -86,17 +86,17 @@ def main():
     per_class_f1 = []
     for cls in range(data_cfg["num_classes"]):
         union = tp[cls] + fp[cls] + fn[cls]
-        per_class_iou.append(float("nan") if union == 0 else (tp[cls] / union).item())
+        per_class_iou.append(0.0 if union == 0 else (tp[cls] / union).item())
         denom = 2 * tp[cls] + fp[cls] + fn[cls]
-        per_class_f1.append(float("nan") if denom == 0 else ((2 * tp[cls]) / denom).item())
+        per_class_f1.append(0.0 if denom == 0 else ((2 * tp[cls]) / denom).item())
 
     oa = total_correct / total_pixels if total_pixels > 0 else 0.0
 
     metrics = {
         "loss": total_loss / max(len(loader), 1),
         "oa": oa,
-        "miou": float(np.nanmean(per_class_iou)),
-        "mf1": float(np.nanmean(per_class_f1)),
+        "miou": sum(per_class_iou) / len(per_class_iou),
+        "mf1": sum(per_class_f1) / len(per_class_f1),
         "per_class_iou": per_class_iou,
         "per_class_f1": per_class_f1,
     }

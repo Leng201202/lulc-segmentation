@@ -6,12 +6,15 @@ from datasets.label_maps import IGNORE_INDEX
 
 
 class DiceLoss(nn.Module):
-    def __init__(self, num_classes: int, ignore_index: int = IGNORE_INDEX):
+    def __init__(self, num_classes: int, ignore_index: int = IGNORE_INDEX, epsilon: float = 1e-7):
         super().__init__()
         self.num_classes = num_classes
         self.ignore_index = ignore_index
+        self.epsilon = epsilon
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Clamp logits to prevent extreme values
+        logits = torch.clamp(logits, -50.0, 50.0)
         probs = F.softmax(logits, dim=1)
         valid = targets != self.ignore_index
 
@@ -20,13 +23,19 @@ class DiceLoss(nn.Module):
             pred = probs[:, cls]
             target = (targets == cls).float()
             mask = valid.float()
+            
             intersection = (pred * target * mask).sum()
             union = (pred * mask).sum() + (target * mask).sum()
-            if union > 0:
-                dice_scores.append(1.0 - (2.0 * intersection + 1.0) / (union + 1.0))
+            
+            if union > self.epsilon:
+                dice_score = (2.0 * intersection + self.epsilon) / (union + self.epsilon)
+                dice_loss = 1.0 - dice_score
+                # Clamp to prevent extreme values
+                dice_loss = torch.clamp(dice_loss, 0.0, 1.0)
+                dice_scores.append(dice_loss)
 
         if not dice_scores:
-            return torch.tensor(0.0, device=logits.device)
+            return torch.tensor(0.0, device=logits.device, requires_grad=True)
         return torch.stack(dice_scores).mean()
 
 
