@@ -7,8 +7,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-import ttach
-from PIL import Image
+import ttach as tta
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -17,7 +16,7 @@ from datasets.irsamap import IRSAMapDataset, list_image_files
 from models.unetformer import build_model
 from tools.config import get_data_paths, load_config
 from tools.metrics import compute_metrics, mean_iou, mean_dice
-from tools.palette import CLASS_NAMES, COLOR_PALETTE, class_indices_to_color
+from tools.palette import CLASS_NAMES, class_indices_to_color
 from tools.utils import get_device
 
 
