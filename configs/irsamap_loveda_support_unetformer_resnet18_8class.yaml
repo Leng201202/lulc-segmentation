@@ -8,7 +8,7 @@ data:
   ignore_index: 255
   image_size: 1024
   irsamap:
-    root: data/IRSAMap
+    root: data/IRSAMap_prepared
     train_images: train/images
     train_masks: train/masks_rgb
     val_images: val/images

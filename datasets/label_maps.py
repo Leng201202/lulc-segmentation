@@ -26,6 +26,24 @@ CLASS_COLORS = {
     7: (204, 181, 206),  # Bareland
 }
 
+# IRSAMap grayscale category codes (SegLabel_vwsbr / SegLabel_rvwsb).
+# The official second-level codes: {10, 11, 12, 21, 22, 23, 31, 32, 33, 34, 40}.
+# 0 is treated as background / unlabeled -> IGNORE_INDEX.
+IRSAMAP_CATEGORY_CODE_TO_CLASS = {
+    0:  IGNORE_INDEX,
+    10: 0,  # Farmland
+    11: 1,  # Tree
+    12: 2,  # Grass
+    21: 3,  # Water (river)
+    22: 3,  # Water (lake)
+    23: 3,  # Water (sea)
+    31: 4,  # Building
+    32: 5,  # Road area
+    33: 5,  # Road line
+    34: 6,  # Sport
+    40: 7,  # Bareland
+}
+
 IRSAMAP_RGB_TO_CLASS = {
     (255, 253, 145): 0,
     (32, 216, 109): 1,

@@ -8,11 +8,19 @@ def load_config(path: str | Path) -> dict:
         return yaml.safe_load(handle)
 
 
-def resolve_path(base: Path, relative: str | None) -> Path | None:
-    if not relative:
+def resolve_path(base: Path, relative: str | Path | None) -> Path | None:
+    """Resolve a possibly-relative path against a base directory.
+
+    - If `relative` is None/empty, returns None.
+    - If `relative` is already an absolute path, returns it as-is.
+    - Otherwise, returns `base / relative`.
+    """
+    if relative is None or relative == "":
         return None
     path = Path(relative)
-    return path if path.is_absolute() else base / path
+    if path.is_absolute():
+        return path
+    return base / path
 
 
 def get_project_root() -> Path:

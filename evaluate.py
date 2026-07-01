@@ -31,7 +31,10 @@ def parse_args():
 def main():
     args = parse_args()
     project_root = get_project_root()
-    config = load_config(resolve_path(args.config, project_root))
+    config_path = resolve_path(project_root, args.config)
+    if config_path is None or not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {args.config}")
+    config = load_config(config_path)
     data_cfg = config["data"]
     train_cfg = config["train"]
 
@@ -39,7 +42,10 @@ def main():
     loader = build_test_loader(config)
 
     model = build_model(config).to(device)
-    checkpoint = torch.load(resolve_path(args.checkpoint, project_root), map_location=device, weights_only=False)
+    checkpoint_path = resolve_path(project_root, args.checkpoint)
+    if checkpoint_path is None or not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
@@ -99,12 +105,12 @@ def main():
     print(format_metrics(metrics))
     print(f"Loss: {metrics['loss']:.4f}")
 
-    output_path = resolve_path(args.output, project_root)
+    output_path = resolve_path(project_root, args.output)
     save_metrics(metrics, output_path)
 
     summary = {
         "experiment": config["experiment"]["name"],
-        "checkpoint": str(resolve_path(args.checkpoint, project_root)),
+        "checkpoint": str(resolve_path(project_root, args.checkpoint)),
         "metrics": metrics,
         "class_names": CLASS_NAMES,
     }

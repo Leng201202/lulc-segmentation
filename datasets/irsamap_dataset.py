@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from datasets.label_maps import IGNORE_INDEX, IRSAMAP_RGB_TO_CLASS
+from datasets.label_maps import IGNORE_INDEX, IRSAMAP_CATEGORY_CODE_TO_CLASS, IRSAMAP_RGB_TO_CLASS
 from datasets.transforms import build_transforms
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
@@ -28,6 +28,28 @@ def rgb_mask_to_class_indices(mask_rgb: np.ndarray) -> np.ndarray:
         class_map[match] = class_id
 
     return class_map
+
+
+def category_code_mask_to_class(mask: np.ndarray) -> np.ndarray:
+    """Remap grayscale category codes (e.g. 0, 11, 12, 31, 32, ...) into the 8 class indices.
+
+    Any code not present in IRSAMAP_CATEGORY_CODE_TO_CLASS is mapped to IGNORE_INDEX.
+    """
+    class_map = np.full(mask.shape, IGNORE_INDEX, dtype=np.int64)
+    for code, class_id in IRSAMAP_CATEGORY_CODE_TO_CLASS.items():
+        class_map[mask == code] = class_id
+    return class_map
+
+
+def mask_to_class_indices(mask: np.ndarray) -> np.ndarray:
+    """Convert an IRSAMap mask to class indices.
+
+    - 2D mask -> treated as grayscale category codes.
+    - 3D mask -> treated as RGB and matched against the colored palette.
+    """
+    if mask.ndim == 2:
+        return category_code_mask_to_class(mask.astype(np.int64))
+    return rgb_mask_to_class_indices(mask)
 
 
 class IRSAMapDataset(Dataset):
@@ -64,11 +86,12 @@ class IRSAMapDataset(Dataset):
             raise FileNotFoundError(f"Unable to read image: {image_path}")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        mask_rgb = cv2.imread(str(mask_path), cv2.IMREAD_COLOR)
-        if mask_rgb is None:
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_UNCHANGED)
+        if mask is None:
             raise FileNotFoundError(f"Unable to read mask: {mask_path}")
-        mask_rgb = cv2.cvtColor(mask_rgb, cv2.COLOR_BGR2RGB)
-        mask = rgb_mask_to_class_indices(mask_rgb)
+        if mask.ndim == 3:
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
+        mask = mask_to_class_indices(mask)
 
         transformed = self.transform(image=image, mask=mask)
         return {

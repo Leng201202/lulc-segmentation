@@ -58,7 +58,7 @@ def predict_image(model, image_rgb, transform, device, original_size):
 def main():
     args = parse_args()
     project_root = get_project_root()
-    config = load_config(resolve_path(args.config, project_root))
+    config = load_config(resolve_path(project_root, args.config))
     data_cfg = config["data"]
     train_cfg = config["train"]
     irsamap_cfg = data_cfg["irsamap"]
@@ -71,7 +71,7 @@ def main():
         image_dir = resolve_path(root, irsamap_cfg["val_images"])
         mask_dir = resolve_path(root, irsamap_cfg["val_masks"])
 
-    output_dir = resolve_path(args.output, project_root)
+    output_dir = resolve_path(project_root, args.output)
     pred_dir = output_dir / "masks"
     color_dir = output_dir / "color"
     vis_dir = output_dir / "visualizations"
@@ -80,7 +80,7 @@ def main():
 
     device = get_device(train_cfg.get("device", "cuda"), train_cfg.get("gpu_id", 0))
     model = build_model(config).to(device)
-    checkpoint = torch.load(resolve_path(args.checkpoint, project_root), map_location=device, weights_only=False)
+    checkpoint = torch.load(resolve_path(project_root, args.checkpoint), map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
