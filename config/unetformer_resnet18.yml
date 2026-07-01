@@ -33,7 +33,7 @@ train:
   device: cuda
   epochs: 35
   gpu_id: 0
-  log_interval: 10
+  log_interval: 50
   lr: 0.0006
   num_workers: 4
   save_interval: 10

@@ -91,7 +91,7 @@ def main():
     total_batches = 0
 
     with torch.no_grad():
-        for batch in tqdm(loader, desc="Validate"):
+        for batch in tqdm(loader, desc="Validate", ncols=80):
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
             outputs = model(images)

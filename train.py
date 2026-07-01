@@ -40,7 +40,7 @@ def evaluate(model, loader, criterion, device, num_classes, ignore_index, class_
     total_batches = 0
 
     with torch.no_grad():
-        for batch in tqdm(loader, desc="Validate", leave=False):
+        for batch in tqdm(loader, desc="Validate", leave=False, ncols=80):
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
             outputs = model(images)
@@ -102,7 +102,7 @@ def evaluate(model, loader, criterion, device, num_classes, ignore_index, class_
 def train_one_epoch(model, loader, criterion, optimizer, device, log_interval):
     model.train()
     running_loss = 0.0
-    progress = tqdm(loader, desc="Train", leave=False)
+    progress = tqdm(loader, desc="Train", leave=False, ncols=80)
 
     for step, batch in enumerate(progress, start=1):
         images = batch["image"].to(device)
@@ -116,7 +116,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device, log_interval):
 
         running_loss += loss.item()
         if step % log_interval == 0:
-            progress.set_postfix(loss=f"{running_loss / step:.4f}")
+            progress.set_postfix(loss=f"{running_loss / step:.4f}", refresh=False)
 
     return running_loss / max(len(loader), 1)
 
