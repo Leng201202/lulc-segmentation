@@ -28,9 +28,8 @@ CLASS_COLORS = {
 
 # IRSAMap grayscale category codes (SegLabel_vwsbr / SegLabel_rvwsb).
 # The official second-level codes: {10, 11, 12, 21, 22, 23, 31, 32, 33, 34, 40}.
-# 0 is treated as background / unlabeled -> IGNORE_INDEX.
+# Code 0 (unlabeled / background) defaults to Bareland (7) via the loader.
 IRSAMAP_CATEGORY_CODE_TO_CLASS = {
-    0:  IGNORE_INDEX,
     10: 0,  # Farmland
     11: 1,  # Tree
     12: 2,  # Grass
