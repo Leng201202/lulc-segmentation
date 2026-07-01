@@ -1,39 +1,51 @@
 import numpy as np
 
 # IRSAMap: https://github.com/ucas-dlg/IRSAMap
-# Paper TABLE III — 11 land-cover classes + background (class index 0).
+# Modified to 9 classes (8 + background):
+# - Merged river/lakes/sea → water_body
+# - Merged road_area/road_line → road
 
 CLASS_NAMES = [
     "background",
     "farmland",
     "tree",
     "grass",
-    "river",
-    "lakes",
-    "sea",
+    "water_body",
     "building",
-    "road_area",
-    "road_line",
+    "road",
     "sport",
     "bareland",
 ]
 
-# ref-code 1-11 -> class index 1-11 (SegLabel_*_0-11 rasters).
-REF_CODE_TO_CLASS = {i: i for i in range(12)}
+# ref-code 1-11 -> class index (with merged water bodies and roads)
+REF_CODE_TO_CLASS = {
+    0: 0,
+    1: 1,  # farmland
+    2: 2,  # tree
+    3: 3,  # grass
+    4: 4,  # river → water_body
+    5: 4,  # lakes → water_body
+    6: 4,  # sea → water_body
+    7: 5,  # building
+    8: 6,  # road_area → road
+    9: 6,  # road_line → road
+    10: 7,  # sport
+    11: 8,  # bareland
+}
 
 # Official second-level category codes (SegLabel_rvwsb / SegLabel_vwsbr).
 CATEGORY_CODE_TO_CLASS = {
     10: 1,   # farmland
     11: 2,   # tree
     12: 3,   # grass
-    21: 4,   # river
-    22: 5,   # lakes
-    23: 6,   # sea
-    31: 7,   # building
-    32: 8,   # road_area
-    33: 9,   # road_line
-    34: 10,  # sport
-    40: 11,  # bareland
+    21: 4,   # river → water_body
+    22: 4,   # lakes → water_body
+    23: 4,   # sea → water_body
+    31: 5,   # building
+    32: 6,   # road_area → road
+    33: 6,   # road_line → road
+    34: 7,   # sport
+    40: 8,   # bareland
 }
 
 # Official RGB colors (ref-code 1-11).
@@ -41,14 +53,14 @@ RGB_TO_CLASS = {
     (255, 253, 145): 1,
     (32, 216, 109): 2,
     (1, 252, 119): 3,
-    (20, 197, 246): 4,
-    (20, 185, 246): 5,
-    (20, 197, 232): 6,
-    (210, 75, 97): 7,
-    (255, 200, 1): 8,
-    (192, 1, 255): 9,
-    (255, 156, 95): 10,
-    (204, 181, 206): 11,
+    (20, 197, 246): 4,  # river → water_body
+    (20, 185, 246): 4,  # lakes → water_body
+    (20, 197, 232): 4,  # sea → water_body
+    (210, 75, 97): 5,
+    (255, 200, 1): 6,  # road_area → road (using road_area color)
+    (192, 1, 255): 6,  # road_line → road
+    (255, 156, 95): 7,
+    (204, 181, 206): 8,
 }
 
 COLOR_PALETTE = np.array(
@@ -57,12 +69,9 @@ COLOR_PALETTE = np.array(
         [255, 253, 145],
         [32, 216, 109],
         [1, 252, 119],
-        [20, 197, 246],
-        [20, 185, 246],
-        [20, 197, 232],
+        [20, 197, 246],  # water_body
         [210, 75, 97],
-        [255, 200, 1],
-        [192, 1, 255],
+        [255, 200, 1],  # road
         [255, 156, 95],
         [204, 181, 206],
     ],
