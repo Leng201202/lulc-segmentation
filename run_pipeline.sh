@@ -23,6 +23,9 @@ send_error_email() {
     local failed_step="$2"
     local log_file="$3"
 
+    # Convert Windows backslashes to forward slashes to avoid Python escape issues
+    log_file=$(echo "$log_file" | tr '\\' '/')
+
     # Get last 50 lines of log output to include in the email body
     local log_summary
     if [[ -f "$log_file" ]]; then
@@ -104,13 +107,16 @@ EOF
 
 # Helper function to run training, evaluation, and visualization for a stage
 run_stage() {
-    local stage_name="$1"
-    local config_file="$2"
-    local checkpoint_name="$3"
+    local pipeline_name="$1"
+    local stage_name="$2"
+    local config_file="$3"
+    local checkpoint_name="$4"
     
-    local train_log="$LOG_DIR/${stage_name}_train.log"
-    local eval_log="$LOG_DIR/${stage_name}_eval.log"
-    local predict_log="$LOG_DIR/${stage_name}_predict.log"
+    local train_log="$LOG_DIR/${pipeline_name}_${stage_name}_train.log"
+    local eval_log="$LOG_DIR/${pipeline_name}_${stage_name}_eval.log"
+    local predict_log="$LOG_DIR/${pipeline_name}_${stage_name}_predict.log"
+    local eval_output="outputs/evaluations/${pipeline_name}/${stage_name}/evaluation_results.json"
+    local predict_output="outputs/predictions/${pipeline_name}/${stage_name}"
 
     echo "=========================================================================="
     echo "▶️ STARTING PIPELINE STAGE: $stage_name"
@@ -129,11 +135,12 @@ run_stage() {
     echo "Training completed successfully."
     echo
 
+
     # 2. Evaluate on test set
     echo "--- [2/3] Evaluating ($stage_name) ---"
-    echo "Running: python evaluate.py --config $config_file --checkpoint checkpoints/$checkpoint_name"
+    echo "Running: python evaluate.py --config $config_file --checkpoint checkpoints/$checkpoint_name --output $eval_output"
     echo "Logging to: $eval_log"
-    if ! python evaluate.py --config "$config_file" --checkpoint "checkpoints/$checkpoint_name" 2>&1 | tee "$eval_log"; then
+    if ! python evaluate.py --config "$config_file" --checkpoint "checkpoints/$checkpoint_name" --output "$eval_output" 2>&1 | tee "$eval_log"; then
         echo "❌ ERROR: Evaluation failed during stage '$stage_name'."
         echo "🔍 Please check the log file for details: $eval_log"
         send_error_email "$stage_name" "Evaluation" "$eval_log"
@@ -142,11 +149,12 @@ run_stage() {
     echo "Evaluation completed successfully."
     echo
 
+
     # 3. Generate predictions & visualizations
     echo "--- [3/3] Predicting/Visualizing ($stage_name) ---"
-    echo "Running: python predict.py --config $config_file --checkpoint checkpoints/$checkpoint_name --split test"
+    echo "Running: python predict.py --config $config_file --checkpoint checkpoints/$checkpoint_name --split test --output $predict_output"
     echo "Logging to: $predict_log"
-    if ! python predict.py --config "$config_file" --checkpoint "checkpoints/$checkpoint_name" --split test 2>&1 | tee "$predict_log"; then
+    if ! python predict.py --config "$config_file" --checkpoint "checkpoints/$checkpoint_name" --split test --output "$predict_output" 2>&1 | tee "$predict_log"; then
         echo "❌ ERROR: Prediction/Visualization failed during stage '$stage_name'."
         echo "🔍 Please check the log file for details: $predict_log"
         send_error_email "$stage_name" "Prediction/Visualization" "$predict_log"
@@ -163,19 +171,20 @@ run_stage() {
 # ==============================================================================
 # PIPELINE EXECUTION FLOW
 # ==============================================================================
+PIPELINE_NAME="unetformer_resnet18"
 
-# Stage 1 — Baseline (IRSAMap only)
-# run_stage "Stage_1_Baseline" \
-#           "configs/irsamap_unetformer_resnet18_8class.yaml" \
-#           "best_irsamap.pth"
+Stage 1 — Baseline (IRSAMap only)
+run_stage "$PIPELINE_NAME" "Stage_1_Baseline" \
+          "configs/irsamap_unetformer_resnet18_8class.yaml" \
+          "best_irsamap.pth"
 
 # Stage 2 — Support training (IRSAMap + LoveDA support)
-run_stage "Stage_2_Support" \
+run_stage "$PIPELINE_NAME" "Stage_2_Support" \
           "configs/irsamap_loveda_support_unetformer_resnet18_8class.yaml" \
           "best_irsamap_loveda_support.pth"
 
-# Stage 3 — Fine-tuning (on IRSAMap only from Stage 2 checkpoint)
-run_stage "Stage_3_Finetuning" \
+# Stage 3 — Fine-tuning IRSAMap only from Stage 2 checkpoint
+run_stage "$PIPELINE_NAME" "Stage_3_Finetuning" \
           "configs/irsamap_finetune_from_support.yaml" \
           "best_irsamap_finetune.pth"
 

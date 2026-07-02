@@ -20,7 +20,7 @@ def list_image_files(directory: Path | None) -> list[Path]:
 
 
 def rgb_mask_to_class_indices(mask_rgb: np.ndarray) -> np.ndarray:
-    class_map = np.full(mask_rgb.shape[:2], 7, dtype=np.int64)
+    class_map = np.full(mask_rgb.shape[:2], 7, dtype=np.int64)  # Unmapped valid pixels → Bareland 7
     rgb = mask_rgb[..., :3].astype(np.int32)
 
     for color, class_id in IRSAMAP_RGB_TO_CLASS.items():
@@ -33,9 +33,11 @@ def rgb_mask_to_class_indices(mask_rgb: np.ndarray) -> np.ndarray:
 def category_code_mask_to_class(mask: np.ndarray) -> np.ndarray:
     """Remap grayscale category codes (e.g. 0, 11, 12, 31, 32, ...) into the 8 class indices.
 
-    Unlabeled / unmapped pixels default to Bareland (7).
+    - Code 0: True no-data → IGNORE_INDEX (255)
+    - Unmapped codes: Valid but unassigned → Bareland 7
     """
     class_map = np.full(mask.shape, 7, dtype=np.int64)
+    class_map[mask == 0] = IGNORE_INDEX  # True no-data/background
     for code, class_id in IRSAMAP_CATEGORY_CODE_TO_CLASS.items():
         class_map[mask == code] = class_id
     return class_map

@@ -352,9 +352,11 @@ class UNetFormer(nn.Module):
         num_classes=6,
     ):
         super().__init__()
+        self.backbone_name = backbone_name
         
         # Determine out_indices based on backbone type
-        if "swin" in backbone_name.lower():
+        self.is_swin = "swin" in backbone_name.lower()
+        if self.is_swin:
             out_indices = (0, 1, 2, 3)
         else:
             out_indices = (1, 2, 3, 4)
@@ -376,8 +378,8 @@ class UNetFormer(nn.Module):
         # If features are in (N, H, W, C) format (like Swin), permute to (N, C, H, W)
         permuted = []
         for feat in features:
-            if len(feat.shape) == 4 and feat.shape[1] < feat.shape[-1]:
-                # Assume (N, H, W, C), permute to (N, C, H, W)
+            if self.is_swin:
+                # (N, H, W, C) → (N, C, H, W)
                 permuted_feat = feat.permute(0, 3, 1, 2).contiguous()
                 permuted.append(permuted_feat)
             else:
