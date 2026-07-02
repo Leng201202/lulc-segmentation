@@ -46,7 +46,7 @@ send_error_email() {
     fi
 
     if [[ -z "$EMAIL_TO" || -z "$SMTP_SERVER" || -z "$SMTP_USER" || -z "$SMTP_PASS" ]]; then
-        echo "⚠️ Email notification skipped: SMTP parameters are not fully configured in run_pipeline.sh."
+        echo "⚠️ Email notification skipped: SMTP parameters are not fully configured in run_pipeline_swinb.sh."
         return 0
     fi
 
@@ -62,12 +62,12 @@ try:
     msg = MIMEMultipart()
     msg['From'] = "${EMAIL_FROM}"
     msg['To'] = "${EMAIL_TO}"
-    msg['Subject'] = "❌ [LULC Pipeline Failure] ${stage_name}: ${failed_step} Failed"
+    msg['Subject'] = "❌ [LULC Swin-B Pipeline Failure] ${stage_name}: ${failed_step} Failed"
 
     body = """
 Attention,
 
-An error occurred in the LULC Segmentation training pipeline.
+An error occurred in the LULC Segmentation Swin-B training pipeline.
 
 Failure Details:
 ---------------------------------------------
@@ -113,7 +113,7 @@ run_stage() {
     local predict_log="$LOG_DIR/${stage_name}_predict.log"
 
     echo "=========================================================================="
-    echo "▶️ STARTING PIPELINE STAGE: $stage_name"
+    echo "▶️ STARTING SWIN-B PIPELINE STAGE: $stage_name"
     echo "=========================================================================="
     
     # 1. Train the model
@@ -129,6 +129,7 @@ run_stage() {
     echo "Training completed successfully."
     echo
 
+
     # 2. Evaluate on test set
     echo "--- [2/3] Evaluating ($stage_name) ---"
     echo "Running: python evaluate.py --config $config_file --checkpoint checkpoints/$checkpoint_name"
@@ -141,6 +142,7 @@ run_stage() {
     fi
     echo "Evaluation completed successfully."
     echo
+
 
     # 3. Generate predictions & visualizations
     echo "--- [3/3] Predicting/Visualizing ($stage_name) ---"
@@ -155,28 +157,28 @@ run_stage() {
     echo "Predictions completed successfully."
     echo
     
-    echo "✅ Pipeline Stage '$stage_name' finished successfully!"
+    echo "✅ Swin-B Pipeline Stage '$stage_name' finished successfully!"
     echo "=========================================================================="
     echo
 }
 
 # ==============================================================================
-# PIPELINE EXECUTION FLOW
+# SWIN-B PIPELINE EXECUTION FLOW
 # ==============================================================================
 
 # Stage 1 — Baseline (IRSAMap only)
-# run_stage "Stage_1_Baseline" \
-#           "configs/irsamap_unetformer_resnet18_8class.yaml" \
-#           "best_irsamap.pth"
+run_stage "Stage_1_SwinB_Baseline" \
+          "configs/irsamap_swinb_baseline.yaml" \
+          "best_irsamap_swinb_baseline.pth"
 
 # Stage 2 — Support training (IRSAMap + LoveDA support)
-run_stage "Stage_2_Support" \
-          "configs/irsamap_loveda_support_unetformer_resnet18_8class.yaml" \
-          "best_irsamap_loveda_support.pth"
+run_stage "Stage_2_SwinB_Support" \
+          "configs/irsamap_swinb_support.yaml" \
+          "best_irsamap_swinb_support.pth"
 
 # Stage 3 — Fine-tuning (on IRSAMap only from Stage 2 checkpoint)
-run_stage "Stage_3_Finetuning" \
-          "configs/irsamap_finetune_from_support.yaml" \
-          "best_irsamap_finetune.pth"
+run_stage "Stage_3_SwinB_Finetuning" \
+          "configs/irsamap_swinb_finetune.yaml" \
+          "best_irsamap_swinb_finetune.pth"
 
-echo "🎉 All 3 pipeline stages (Train → Evaluate → Predict) finished successfully!"
+echo "🎉 All 3 Swin-B pipeline stages (Train → Evaluate → Predict) finished successfully!"

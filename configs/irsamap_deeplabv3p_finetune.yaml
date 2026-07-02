@@ -1,7 +1,7 @@
 experiment:
-  name: irsamap_loveda_support
-  stage: support
-  description: Stage 2 - IRSAMap + LoveDA targeted support
+  name: irsamap_deeplabv3p_finetune
+  stage: finetune
+  description: Stage 3 - Fine-tune DeepLabV3+ Stage 2 checkpoint on IRSAMap only
 
 data:
   num_classes: 8
@@ -16,35 +16,29 @@ data:
     test_images: test/images
     test_masks: test/masks_rgb
   loveda:
-    enabled: true
-    root: data/LoveDA_prepared
-    train_images: train/images
-    train_masks: train/masks
-    mapping: targeted
-    irsamap_weight: 0.8
-    loveda_weight: 0.2
+    enabled: false
 
 model:
-  name: unetformer
-  backbone: swsl_resnet18
-  pretrained: true
-  decode_channels: 64
-  window_size: 8
-  dropout: 0.1
+  name: deeplabv3p
+  backbone: resnet101
+  pretrained: false
+  dropout: 0.5
 
 train:
   device: cuda
   gpu_id: 0
-  epochs: 40
-  batch_size: 8
-  val_batch_size: 8
+  epochs: 25
+  batch_size: 4
+  val_batch_size: 4
   num_workers: 4
-  lr: 0.0001
+  lr: 0.0003
   weight_decay: 0.01
   aux_loss_weight: 0.4
   seed: 42
   checkpoint_dir: checkpoints
-  checkpoint_name: best_irsamap_loveda_support.pth
+  checkpoint_name: best_irsamap_deeplabv3p_finetune.pth
+  resume: checkpoints/best_irsamap_deeplabv3p_support.pth
+  finetune_reset_optimizer: true
   log_interval: 10
   save_interval: 10
   early_stopping_patience: 10

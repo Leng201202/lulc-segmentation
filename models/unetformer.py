@@ -352,11 +352,18 @@ class UNetFormer(nn.Module):
         num_classes=6,
     ):
         super().__init__()
+        
+        # Determine out_indices based on backbone type
+        if "swin" in backbone_name.lower():
+            out_indices = (0, 1, 2, 3)
+        else:
+            out_indices = (1, 2, 3, 4)
+        
         self.backbone = timm.create_model(
             backbone_name,
             features_only=True,
             output_stride=32,
-            out_indices=(1, 2, 3, 4),
+            out_indices=out_indices,
             pretrained=pretrained,
         )
         encoder_channels = self.backbone.feature_info.channels()
@@ -364,5 +371,17 @@ class UNetFormer(nn.Module):
 
     def forward(self, x):
         h, w = x.shape[-2:]
-        res1, res2, res3, res4 = self.backbone(x)
+        features = self.backbone(x)
+        
+        # If features are in (N, H, W, C) format (like Swin), permute to (N, C, H, W)
+        permuted = []
+        for feat in features:
+            if len(feat.shape) == 4 and feat.shape[1] < feat.shape[-1]:
+                # Assume (N, H, W, C), permute to (N, C, H, W)
+                permuted_feat = feat.permute(0, 3, 1, 2).contiguous()
+                permuted.append(permuted_feat)
+            else:
+                permuted.append(feat)
+        
+        res1, res2, res3, res4 = permuted
         return self.decoder(res1, res2, res3, res4, h, w)

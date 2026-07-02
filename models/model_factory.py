@@ -1,4 +1,5 @@
 from models.unetformer import UNetFormer
+from models.deeplabv3p import DeepLabV3Plus
 
 
 def build_model(config: dict):
@@ -15,8 +16,15 @@ def build_model(config: dict):
             window_size=model_cfg.get("window_size", 8),
             num_classes=num_classes,
         )
+    elif model_name == "deeplabv3p":
+        return DeepLabV3Plus(
+            num_classes=num_classes,
+            backbone_name=model_cfg.get("backbone", "resnet101"),
+            pretrained=model_cfg.get("pretrained", True),
+            dropout=model_cfg.get("dropout", 0.5),
+        )
 
     raise NotImplementedError(
         f"Model '{model_name}' is not implemented yet. "
-        "Currently supported: unetformer"
+        "Currently supported: unetformer, deeplabv3p"
     )
