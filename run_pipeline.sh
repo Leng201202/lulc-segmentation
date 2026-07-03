@@ -55,52 +55,75 @@ send_error_email() {
 
     echo "📧 Sending error notification email..."
 
-    $python_cmd - <<EOF
+    # Create a temporary Python script to avoid heredoc issues with special characters
+    local temp_py=$(mktemp /tmp/lulc_email.XXXXXX.py 2>/dev/null || mktemp lulc_email.XXXXXX.py)
+    
+    cat > "$temp_py" <<'EOF'
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import sys
+
+stage_name = sys.argv[1]
+failed_step = sys.argv[2]
+log_file = sys.argv[3]
+email_from = sys.argv[4]
+email_to = sys.argv[5]
+smtp_server = sys.argv[6]
+smtp_port = int(sys.argv[7])
+smtp_user = sys.argv[8]
+smtp_pass = sys.argv[9]
+
+# Read log summary from stdin
+log_summary = sys.stdin.read()
 
 try:
     # Create email message
     msg = MIMEMultipart()
-    msg['From'] = "${EMAIL_FROM}"
-    msg['To'] = "${EMAIL_TO}"
-    msg['Subject'] = "❌ [LULC Pipeline Failure] ${stage_name}: ${failed_step} Failed"
+    msg['From'] = email_from
+    msg['To'] = email_to
+    msg['Subject'] = f"❌ [LULC Pipeline Failure] {stage_name}: {failed_step} Failed"
 
-    body = """
+    body = f"""
 Attention,
 
 An error occurred in the LULC Segmentation training pipeline.
 
 Failure Details:
 ---------------------------------------------
-Stage: ${stage_name}
-Step: ${failed_step}
-Log Path: ${log_file}
+Stage: {stage_name}
+Step: {failed_step}
+Log Path: {log_file}
 ---------------------------------------------
 
 Last 50 lines of log file:
 ---------------------------------------------
-""" + """${log_summary}""" + """
+{log_summary}
 ---------------------------------------------
 """
     msg.attach(MIMEText(body, 'plain'))
 
     # Connect and send via SMTP (supports SSL on 465, STARTTLS on 587)
-    if ${SMTP_PORT} == 465:
-        server = smtplib.SMTP_SSL("${SMTP_SERVER}", ${SMTP_PORT})
+    if smtp_port == 465:
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
     else:
-        server = smtplib.SMTP("${SMTP_SERVER}", ${SMTP_PORT})
+        server = smtplib.SMTP(smtp_server, smtp_port)
         server.ehlo()
         server.starttls()
         server.ehlo()
-    server.login("${SMTP_USER}", "${SMTP_PASS}")
-    server.sendmail("${EMAIL_FROM}", "${EMAIL_TO}", msg.as_string())
+    server.login(smtp_user, smtp_pass)
+    server.sendmail(email_from, email_to, msg.as_string())
     server.close()
     print("✅ Email notification sent successfully.")
 except Exception as e:
     print(f"❌ Failed to send email notification: {e}")
 EOF
+
+    # Send the email using the temporary script
+    echo "$log_summary" | $python_cmd "$temp_py" "$stage_name" "$failed_step" "$log_file" "$EMAIL_FROM" "$EMAIL_TO" "$SMTP_SERVER" "$SMTP_PORT" "$SMTP_USER" "$SMTP_PASS"
+
+    # Clean up the temporary script
+    rm -f "$temp_py"
 }
 
 
